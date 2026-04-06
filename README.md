@@ -23,5 +23,15 @@ $$ds^2 = -\left(1 - \frac{2Mr}{\Sigma}\right)dt^2 - \frac{4Mar \sin^2\theta}{\Si
 3. **Intersection Logic**: Checks if rays hit the Event Horizon or the Accretion Disk.
 4. **Renderer**: Converts hit-data into a Redshifted image.
 
+## 💎 Mathematical Rigor
+Unlike standard CGI, this engine uses:
+* **Symplectic Integration**: Ensuring energy conservation ($H=0$) over long geodesics.
+* **Boyer-Lindquist Horizon Mapping**: Proper handling of the coordinate singularity at $r_+ = M + \sqrt{M^2 - a^2}$.
+* **Automated CI**: Every commit is verified against general relativistic conservation laws.
+
+## 🚧 Current Status: The "Interstellar" Milestone
+We are currently integrating the **Volumetric Disk Renderer**. 
+Next Step: **Ray-Batching** (Processing 1,000,000 photons simultaneously using JAX `vmap`).
+
 ## 🚀 Getting Started
 `pip install jax jaxlib numpy matplotlib`
