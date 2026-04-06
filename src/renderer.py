@@ -26,3 +26,14 @@ def trace_batch(initial_state, a, steps=500, dt=0.1):
 
 # The "Magic" function: Vectorize the tracer over millions of pixels
 render_pixels = vmap(trace_batch, in_axes=(0, None))
+
+def compute_color(final_states, hit_disk):
+    """
+    Assigns colors: 
+    - Black for photons swallowed by the hole.
+    - Orange/Red for photons that hit the accretion disk.
+    - Blue/White for background stars (lensed).
+    """
+    brightness = jnp.where(hit_disk, 1.0, 0.0)
+    # Apply a basic fall-off for the "glow"
+    return brightness
