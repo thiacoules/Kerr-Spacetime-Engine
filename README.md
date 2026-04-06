@@ -17,6 +17,16 @@ $$ds^2 = -\left(1 - \frac{2Mr}{\Sigma}\right)dt^2 - \frac{4Mar \sin^2\theta}{\Si
 - [ ] Ray-Tracer Camera Implementation
 - [ ] Accretion Disk Volumetric Rendering
 
+## 📐 Numerical Implementation: The 4th Order Runge-Kutta (RK4)
+While the current engine uses a simple Euler step, we are transitioning to **RK4** for symplectic energy conservation. This is critical for maintaining the photon's Hamiltonian ($H=0$) over long integration distances.
+
+### The Geodesic Equation in First-Order Form:
+Using the Hamilton-Jacobi approach, we decompose the second-order geodesic equation into eight first-order ODEs:
+1. $\dot{x}^\mu = \frac{\partial H}{\partial p_\mu}$
+2. $\dot{p}_\mu = -\frac{\partial H}{\partial x^\mu}$
+
+This allows us to leverage **JAX's `grad`** to compute the Christoffel symbols implicitly, avoiding the need for 64 separate manual derivative equations.
+
 ### 🔄 Data Flow
 1. **Camera Module**: Generates initial photon positions ($q$) and momenta ($p$).
 2. **Solver Module**: Uses JAX-accelerated Hamiltonians to integrate the path.
