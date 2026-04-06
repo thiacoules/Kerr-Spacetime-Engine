@@ -1,0 +1,19 @@
+name: Physics Unit Tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
+      run: |
+        pip install jax jaxlib numpy
+    - name: Run Physics Tests
+      run: |
+        python -m pytest tests/
