@@ -12,9 +12,9 @@ $$ds^2 = -\left(1 - \frac{2Mr}{\Sigma}\right)dt^2 - \frac{4Mar \sin^2\theta}{\Si
 
 ## 🛠 Roadmap
 - [x] Repository Architecture Setup
-- [ ] Implement Boyer-Lindquist Metric Tensor
-- [ ] Hamiltonian Geodesic Integrator (RK4)
-- [ ] Differentiable Ray-Tracing Engine
+- [x] Implement Boyer-Lindquist Metric Tensor
+- [x] Hamiltonian Geodesic Integrator (Auto-diff powered)
+- [ ] Ray-Tracer Camera Implementation
 - [ ] Accretion Disk Volumetric Rendering
 
 ## 🚀 Getting Started
