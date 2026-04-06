@@ -17,5 +17,11 @@ $$ds^2 = -\left(1 - \frac{2Mr}{\Sigma}\right)dt^2 - \frac{4Mar \sin^2\theta}{\Si
 - [ ] Ray-Tracer Camera Implementation
 - [ ] Accretion Disk Volumetric Rendering
 
+### 🔄 Data Flow
+1. **Camera Module**: Generates initial photon positions ($q$) and momenta ($p$).
+2. **Solver Module**: Uses JAX-accelerated Hamiltonians to integrate the path.
+3. **Intersection Logic**: Checks if rays hit the Event Horizon or the Accretion Disk.
+4. **Renderer**: Converts hit-data into a Redshifted image.
+
 ## 🚀 Getting Started
 `pip install jax jaxlib numpy matplotlib`
