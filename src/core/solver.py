@@ -36,21 +36,16 @@ def hamiltonian(phase_space, a, M=1.0):
 @jit
 def geodesic_step(phase_space, dt, a):
     """
-    A single integration step using Hamilton's Equations.
-    dq/dt = dH/dp
-    dp/dt = -dH/dq
+    RK4 Integration: Takes 4 smaller 'test steps' to find the best path.
     """
-    # We use 'grad' to get the gradient with respect to the phase_space vector
-    # This gives us [dH/dt, dH/dr, dH/dtheta, dH/dphi, dH/dpt, dH/dpr, dH/dptheta, dH/dpphi]
-    grads = grad(hamiltonian, argnums=0)(phase_space, a)
-    
-    # Hamilton's Equations:
-    # The first 4 elements of grads are dH/dq (which is -dp/dt)
-    # The last 4 elements of grads are dH/dp (which is +dq/dt)
-    dq_dt = grads[4:]
-    dp_dt = -grads[:4]
-    
-    # Combine them back into the same order as phase_space
-    derivs = jnp.concatenate([dq_dt, dp_dt])
-    
-    return phase_space + derivs * dt
+    def get_derivs(s):
+        grads = grad(hamiltonian, argnums=0)(s, a).ravel()
+        return jnp.concatenate([grads[4:], -grads[:4]])
+
+    # RK4 Formula
+    k1 = get_derivs(phase_space)
+    k2 = get_derivs(phase_space + 0.5 * dt * k1)
+    k3 = get_derivs(phase_space + 0.5 * dt * k2)
+    k4 = get_derivs(phase_space + dt * k3)
+
+    return phase_space + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
