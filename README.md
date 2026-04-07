@@ -1,6 +1,7 @@
 # 🌌 Kerr-Spacetime-Engine
 
-![Current Render](./black_hole_shadow.png)
+<img width="811" height="539" alt="black_hole_shadow" src="https://github.com/user-attachments/assets/f6f1f5f9-abb9-4d6d-9c9a-cab4016fef61" />
+
 
 > **Status:** Physics Verified ✅ | GPU Accelerated 🚀
 
