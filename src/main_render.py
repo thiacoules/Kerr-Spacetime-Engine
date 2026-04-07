@@ -5,80 +5,90 @@ from src.core.solver import geodesic_step
 
 # --- Black Hole Parameters ---
 M = 1.0
-a = 0.95    # Slightly lower spin makes the shadow easier to find initially
-R_camera = 40.0 
+a = 0.99 # Let's go full Interstellar spin!
+R_camera = 20.0 # Moved closer to get a better view without losing accuracy
 
-# --- Resolution (Keep it at 200 for a crisp image) ---
-RESOLUTION = 400
-# We need a very specific grid range to 'frame' the black hole
-view_grid = jnp.linspace(-0.2, 0.2, RESOLUTION)
+# --- Resolution ---
+RESOLUTION = 300 
+# The screen coordinates (Impact Parameters). -15 to 15 beautifully frames the hole.
+view_grid = jnp.linspace(-15.0, 15.0, RESOLUTION)
 
+@jit
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.25
+    dt = 0.1 # Small, smooth steps
     
-    # 1. THE PHYSICS FIX: p_r MUST be negative to move toward the hole
-    # But x_pixel and y_pixel must be VERY SMALL to stay focused on the center.
-    # At R=100, the black hole is tiny. We need a 'telescope' zoom.
+    r0 = R_camera
+    theta0 = jnp.pi/2 - 0.15 # 8.5 degree tilt to see "over" the disk
     
-    # Angle scale: 0.05 makes the FOV very narrow (High Zoom)
-    scale = 0.06 
-    
+    # 1. CAMERA SCREEN SETUP
     p_t = -1.0
-    p_r = -1.0
-    p_theta = y_pixel * scale 
-    p_phi = x_pixel * scale 
+    p_theta = y_pixel
+    p_phi = x_pixel
     
-    # Position: Camera at R=100, theta slightly above equator
-    init_state = jnp.array([0.0, 100.0, jnp.pi/2 - 0.05, 0.0, p_t, p_r, p_theta, p_phi])
+    # 2. THE PHYSICS FIX: Enforcing H=0 (Null Geodesic)
+    # We must calculate p_r exactly based on the inverse metric
+    sigma = r0**2 + a**2 * jnp.cos(theta0)**2
+    delta = r0**2 - 2*M*r0 + a**2
+    
+    g_inv_tt = -( (r0**2 + a**2)**2 - delta * a**2 * jnp.sin(theta0)**2 ) / (sigma * delta)
+    g_inv_tphi = -( 2 * M * r0 * a ) / (sigma * delta)
+    g_inv_rr = delta / sigma
+    g_inv_thth = 1 / sigma
+    g_inv_phiphi = (delta - a**2 * jnp.sin(theta0)**2) / (sigma * delta * jnp.sin(theta0)**2)
+    
+    # Solve for p_r to ensure the photon acts like light
+    C = g_inv_tt * p_t**2 + 2 * g_inv_tphi * p_t * p_phi + g_inv_thth * p_theta**2 + g_inv_phiphi * p_phi**2
+    # Use jnp.maximum to prevent math errors during compilation
+    p_r = -jnp.sqrt(jnp.maximum(-C / g_inv_rr, 0.0001))
+    
+    init_state = jnp.array([0.0, r0, theta0, 0.0, p_t, p_r, p_theta, p_phi])
 
     def step_fn(carry, _):
         state, color, active = carry
         
-        # Adaptive step: Get slower as we get closer
-        r_current = state[1]
-        local_dt = jnp.where(r_current < 15.0, dt * 0.1, dt)
-        
-        new_state = geodesic_step(state, local_dt, a)
-        
-        r, theta, old_theta = new_state[1], new_state[2], state[2]
+        new_state = geodesic_step(state, dt, a)
+        r, theta = new_state[1], new_state[2]
 
-        # Horizon logic
+        # 1. SHADOW: Event Horizon Check
         horizon = M + jnp.sqrt(M**2 - a**2)
-        is_swallowed = r < (horizon + 0.05)
+        is_swallowed = r < (horizon + 0.1)
         
-        # Disk logic: r between 6 and 25
-        crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        is_in_disk = (r > 6.0) & (r < 25.0) & crossed_plane
+        # 2. DISK: Volumetric "Thick" Disk (r between 4 and 15)
+        # Instead of crossing a plane, we check if it's "inside" the glowing gas
+        is_in_disk = (r > 4.0) & (r < 15.0) & (jnp.abs(jnp.cos(theta)) < 0.05)
         
-        # Glow logic
-        brightness = jnp.where(is_in_disk, 1.0 / jnp.sqrt(r), 0.0)
+        # 3. GLOW: Brighter near the center
+        brightness = jnp.where(is_in_disk, 1.5 / jnp.sqrt(r), 0.0)
         
-        # IMPORTANT: Color -1.0 is our 'Shadow' flag
+        # Apply color if we hit the disk
         new_color = jnp.where(active & is_in_disk, brightness, color)
+        
+        # Turn it pure black if it falls into the black hole
         final_color = jnp.where(active & is_swallowed, -1.0, new_color)
         
-        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < 150.0)
+        # Stop tracing if swallowed, hit the disk, or escaped to the background
+        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < R_camera + 5.0)
         
         return (new_state, final_color, still_active), None
 
-    # 3000 steps to allow for the 'Slow Motion' near the hole
-    (final_state, res_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(3000))
+    # Trace for 1000 steps
+    (final_state, res_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1000))
     return res_color
 
-# Vectorization
+# Vectorization (Pushing all pixels to the GPU/CPU at once)
 render_view = vmap(vmap(trace_photon, in_axes=(0, None)), in_axes=(None, 0))
 
-print("🔭 Compiling Kerr-Geometry Kernels...")
+print("🔭 Calibrating H=0 Null Geodesics...")
+print("🔥 Rendering Gargantua Matrix...")
 image = render_view(view_grid, view_grid)
 print("✅ Rendering Finished.")
 
 # --- Professional Post-Processing ---
 plt.figure(figsize=(10, 10), facecolor='black')
-# Use 'inferno' or 'gist_heat' for that movie look
-# We clip the shadow (values of -1) to be pure black
-plt.imshow(image, cmap='hot', origin='lower', vmin=0.0, vmax=0.5)
+# We use .T (Transpose) to ensure X and Y axes are correct
+# vmin=0.0 ensures both the background (0) and shadow (-1) are pitch black
+plt.imshow(image.T, cmap='inferno', origin='lower', vmin=0.0, vmax=0.7)
 plt.axis('off')
-plt.title("Relativistic Ray-Trace: Gargantua v1.0", color='white', fontsize=18)
-plt.savefig("gargantua_v1.png", bbox_inches='tight', pad_inches=0)
+plt.title("Gargantua: H=0 Null Geodesic Engine", color='white', fontsize=16)
+plt.savefig("gargantua_master.png", bbox_inches='tight', pad_inches=0, dpi=150)
 plt.show()
-plt.imshow(image, cmap='inferno', vmin=0.0, vmax=0.4)
