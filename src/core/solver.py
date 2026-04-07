@@ -36,14 +36,21 @@ def hamiltonian(phase_space, a, M=1.0):
 @jit
 def geodesic_step(phase_space, dt, a):
     """
-    A single integration step using Hamilton's Equations:
+    A single integration step using Hamilton's Equations.
     dq/dt = dH/dp
     dp/dt = -dH/dq
     """
-    # Use JAX's 'grad' to automatically get the physics equations!
-    # This is what makes the project "Ambitious" and "Modern"
-    dq_dt = grad(hamiltonian, argnums=1)(phase_space, a) # actually p derivatives
-    dp_dt = -grad(hamiltonian, argnums=0)(phase_space, a) # actually q derivatives
+    # We use 'grad' to get the gradient with respect to the phase_space vector
+    # This gives us [dH/dt, dH/dr, dH/dtheta, dH/dphi, dH/dpt, dH/dpr, dH/dptheta, dH/dpphi]
+    grads = grad(hamiltonian, argnums=0)(phase_space, a)
     
-    # Simple Euler integration (we will upgrade this to RK4 later)
-    return phase_space + jnp.concatenate([dq_dt[4:], dp_dt[:4]]) * dt
+    # Hamilton's Equations:
+    # The first 4 elements of grads are dH/dq (which is -dp/dt)
+    # The last 4 elements of grads are dH/dp (which is +dq/dt)
+    dq_dt = grads[4:]
+    dp_dt = -grads[:4]
+    
+    # Combine them back into the same order as phase_space
+    derivs = jnp.concatenate([dq_dt, dp_dt])
+    
+    return phase_space + derivs * dt
