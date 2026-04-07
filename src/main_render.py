@@ -14,48 +14,46 @@ RESOLUTION = 200 # Higher resolution to see the structure
 view_grid = jnp.linspace(-0.6, 0.6, RESOLUTION)
 
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.5 # Larger steps for faster travel from R=50
-    # The 'p_r = -1.0' fires it inward. 
-    # The 'y_pixel' and 'x_pixel' act as the angle of the lens.
-    init_state = jnp.array([
-        0.0,            # t
-        R_camera,       # r (50.0)
-        jnp.pi/2.05,    # theta (slightly tilted)
-        0.0,            # phi
-        -1.0,           # p_t (Energy)
-        -1.0,           # p_r (Initial velocity INWARD)
-        y_pixel * 0.1,  # p_theta (Small angular tilt)
-        x_pixel * 0.1   # p_phi (Small angular tilt)
-    ])
+    dt = 0.4 # Slightly larger steps to bridge the gap from R=50
+    
+    # 1. Setup 'Aimed' Momentum
+    # Instead of firing straight, we tilt the momentum based on pixel position
+    # This creates a 'Wide Angle' lens effect
+    p_t = -1.0
+    p_r = -1.0 # Moving toward the hole
+    p_theta = y_pixel * 1.5 # Vertical 'tilt'
+    p_phi = x_pixel * 1.5   # Horizontal 'tilt'
+    
+    init_state = jnp.array([0.0, R_camera, jnp.pi/2.05, 0.0, p_t, p_r, p_theta, p_phi])
 
     def step_fn(carry, _):
         state, current_color, active = carry
+        
+        # RK4 Step (Make sure your solver.py is using the RK4 we wrote!)
         new_state = geodesic_step(state, dt, a)
         
         r = new_state[1]
         theta = new_state[2]
         old_theta = state[2]
 
-        # Horizon Check
-        horizon = M + jnp.sqrt(M**2 - a**2)
-        is_swallowed = r < (horizon + 0.1)
+        # Horizon Check (Approx 2.0 for a=0.99)
+        is_swallowed = r < 2.1
         
-        # Disk Check (Widened to 4.0 - 25.0 for more visibility)
+        # Disk Check (Standard 6M to 20M)
         crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        is_in_disk_zone = (r > 4.0) & (r < 25.0) & crossed_plane
+        is_in_disk_zone = (r > 6.0) & (r < 20.0) & crossed_plane
         
-        # Glow logic: Brightness based on proximity
-        hit_brightness = 2.0 / jnp.sqrt(r) 
-        new_color = jnp.where(is_in_disk_zone & active, hit_brightness, current_color)
+        # Glow logic: The closer to the hole, the hotter the disk
+        glow = 5.0 / jnp.sqrt(r)
+        new_color = jnp.where(is_in_disk_zone & active, glow, current_color)
         
-        still_active = active & (~is_swallowed) & (~is_in_disk_zone)
-        # If photon goes too far away (escapes), stop it
-        still_active = still_active & (r < 150.0)
+        # Stop if hit disk, horizon, or escaped to r=200
+        still_active = active & (~is_swallowed) & (~is_in_disk_zone) & (r < 200.0)
         
         return (new_state, new_color, still_active), None
 
-    # Increase steps to 2000 to ensure light reaches the disk from far away
-    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(2000))
+    # 1500 steps is plenty for R=50 to R=2
+    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1500))
     return final_color
 
 # Vectorize across the grid
