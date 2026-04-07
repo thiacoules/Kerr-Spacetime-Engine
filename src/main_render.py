@@ -14,52 +14,52 @@ RESOLUTION = 200
 view_grid = jnp.linspace(-0.2, 0.2, RESOLUTION)
 
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.25 # Precision step
-    
-    # 1. INITIAL MOMENTUM (The 'Aura' Fix)
-    # We fire p_r = -1.0 to go toward the hole.
-    # We use x and y pixels as SMALL angular corrections.
+    dt = 0.2
+    # Place camera far away (R=100) and slightly above the plane
+    # We use a very small tilt (pi/2 - 0.05) to get the Interstellar 'look'
     init_state = jnp.array([
-        0.0,            # t
-        R_camera,       # r
-        jnp.pi/2.05,    # theta (tilted view)
-        0.0,            # phi
-        -1.0,           # p_t (Energy)
-        -1.0,           # p_r (Inward)
-        y_pixel * 3.5,  # p_theta (VERTICAL TILT - lowered from 10.0)
-        x_pixel * 3.5   # p_phi (HORIZONTAL TILT - lowered from 10.0)
+        0.0, 100.0, jnp.pi/2 - 0.05, 0.0, 
+        -1.0, -1.0, y_pixel * 15.0, x_pixel * 15.0
     ])
 
     def step_fn(carry, _):
         state, color, active = carry
-        new_state = geodesic_step(state, dt, a)
+        
+        # --- THE FIX: Adaptive Step ---
+        # As r gets smaller, gravity gets stronger. We slow down dt to keep it smooth.
+        r_current = state[1]
+        local_dt = jnp.where(r_current < 10.0, dt * 0.2, dt)
+        
+        new_state = geodesic_step(state, local_dt, a)
         
         r, theta, old_theta = new_state[1], new_state[2], state[2]
 
-        # 1. SHADOW LOGIC
-        # If r gets too close to the horizon, it's black forever.
+        # 1. EVENT HORIZON (The Shadow)
         horizon = M + jnp.sqrt(M**2 - a**2)
-        is_swallowed = r < (horizon + 0.1)
+        is_swallowed = r < (horizon + 0.02)
         
-        # 2. DISK LOGIC (The 'Rings')
-        # Crossing the equatorial plane
+        # 2. ACCRETION DISK (The Rings)
         crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        # The disk is a ring from r=6 to r=15
-        is_in_disk = (r > 6.0) & (r < 15.0) & crossed_plane
+        # Gargantua's disk is vast: 6M to 30M
+        is_in_disk = (r > 6.0) & (r < 30.0) & crossed_plane
         
-        # 3. COLORING (The 'Interstellar' Palette)
-        # Glow is brighter at the inner edge (r=6)
-        brightness = jnp.where(is_in_disk, 1.0 / (r - 5.5), 0.0)
+        # Doppler Shift + Distance Falloff
+        # (r**-1.5 is the standard brightness falloff for accretion disks)
+        brightness = jnp.where(is_in_disk, 10.0 * (r**-1.5), 0.0)
+        
+        # Update color only if active
         new_color = jnp.where(active & is_in_disk, brightness, color)
         
-        # If it hits the horizon, set color to -1.0 (Special flag for Black)
+        # Set to -1 (Black) if swallowed
         final_color = jnp.where(is_swallowed & active, -1.0, new_color)
         
-        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < 100.0)
+        # Kill ray if hit disk, horizon, or escaped
+        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < 150.0) & (r > horizon)
         
         return (new_state, final_color, still_active), None
 
-    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1500))
+    # We need MORE steps (2500) because the camera is now at R=100
+    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(2500))
     return final_color
 
 # Vectorization
