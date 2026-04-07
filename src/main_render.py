@@ -8,52 +8,54 @@ M = 1.0     # Mass
 a = 0.99    # High spin (Gargantua style)
 R_camera = 50.0 
 
-# --- Wider Camera Setup ---
-RESOLUTION = 200 # Higher resolution to see the structure
-# We need a wider field of view to capture the whole disk
-view_grid = jnp.linspace(-0.6, 0.6, RESOLUTION)
+# --- Gargantua Perspective Setup ---
+RESOLUTION = 250  # Better resolution for the 'rings'
+# We use a wider grid to see the whole horizon + disk
+view_grid = jnp.linspace(-0.15, 0.15, RESOLUTION) 
 
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.4 # Slightly larger steps to bridge the gap from R=50
+    dt = 0.3
     
-    # 1. Setup 'Aimed' Momentum
-    # Instead of firing straight, we tilt the momentum based on pixel position
-    # This creates a 'Wide Angle' lens effect
-    p_t = -1.0
-    p_r = -1.0 # Moving toward the hole
-    p_theta = y_pixel * 1.5 # Vertical 'tilt'
-    p_phi = x_pixel * 1.5   # Horizontal 'tilt'
-    
-    init_state = jnp.array([0.0, R_camera, jnp.pi/2.05, 0.0, p_t, p_r, p_theta, p_phi])
+    # Place camera at r=80, tilted 5 degrees off the equator (pi/2.1)
+    # The initial momentum (p_r, p_theta, p_phi) is what 'aims' the lens
+    init_state = jnp.array([
+        0.0,            # t
+        80.0,           # r (Distance)
+        jnp.pi/2.1,     # theta (Tilt)
+        0.0,            # phi
+        -1.0,           # p_t
+        -1.0,           # p_r (Fire toward the center)
+        y_pixel * 10.0, # p_theta (Vertical spread)
+        x_pixel * 10.0  # p_phi (Horizontal spread)
+    ])
 
     def step_fn(carry, _):
-        state, current_color, active = carry
-        
-        # RK4 Step (Make sure your solver.py is using the RK4 we wrote!)
+        state, color, active = carry
         new_state = geodesic_step(state, dt, a)
         
-        r = new_state[1]
-        theta = new_state[2]
-        old_theta = state[2]
+        r, theta, old_theta = new_state[1], new_state[2], state[2]
 
-        # Horizon Check (Approx 2.0 for a=0.99)
-        is_swallowed = r < 2.1
+        # 1. Shadow Logic: Did we hit the horizon?
+        horizon = M + jnp.sqrt(M**2 - a**2)
+        is_swallowed = r < (horizon + 0.05)
         
-        # Disk Check (Standard 6M to 20M)
+        # 2. Disk Logic: Crossing the 'Glow' plane (theta = pi/2)
         crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        is_in_disk_zone = (r > 6.0) & (r < 20.0) & crossed_plane
+        # The disk should exist between 6.0 and 25.0 radius
+        is_in_disk = (r > 6.0) & (r < 25.0) & crossed_plane
         
-        # Glow logic: The closer to the hole, the hotter the disk
-        glow = 5.0 / jnp.sqrt(r)
-        new_color = jnp.where(is_in_disk_zone & active, glow, current_color)
+        # 3. Coloring: 
+        # Inside the disk, brightness falls off as 1/r^2
+        brightness = jnp.where(is_in_disk, 15.0 / (r**1.5), 0.0)
+        new_color = jnp.where(active & is_in_disk, brightness, color)
         
-        # Stop if hit disk, horizon, or escaped to r=200
-        still_active = active & (~is_swallowed) & (~is_in_disk_zone) & (r < 200.0)
+        # Stop if we hit the hole or disk
+        still_active = active & (~is_swallowed) & (~is_in_disk)
         
         return (new_state, new_color, still_active), None
 
-    # 1500 steps is plenty for R=50 to R=2
-    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1500))
+    # Run for 2000 steps to ensure the light has time to travel and curve
+    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(2000))
     return final_color
 
 # Vectorize across the grid
