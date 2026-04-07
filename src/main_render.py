@@ -1,112 +1,94 @@
 import jax.numpy as jnp
 from jax import jit, vmap, lax
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from scipy.ndimage import gaussian_filter
 from src.core.solver import geodesic_step
 
 # --- Black Hole Parameters ---
 M = 1.0
-a = 0.99 
-R_camera = 25.0 # Perfect cinematic distance
-RESOLUTION = 400 
+a = 0.99 # Let's go full Interstellar spin!
+R_camera = 20.0 # Moved closer to get a better view without losing accuracy
 
-# --- FIXED CAMERA LENS ---
-# -1.2 to 1.2 removes the "amoeba" distortion and acts like a 50mm camera lens
-view_grid = jnp.linspace(-1.2, 1.2, RESOLUTION)
+# --- Resolution ---
+RESOLUTION = 300 
+# The screen coordinates (Impact Parameters). -15 to 15 beautifully frames the hole.
+view_grid = jnp.linspace(-15.0, 15.0, RESOLUTION)
 
 @jit
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.2
+    dt = 0.1 # Small, smooth steps
+    
     r0 = R_camera
-    theta0 = jnp.pi/2 - 0.1 # 5.7 degree tilt for the classic Interstellar view
+    theta0 = jnp.pi/2 - 0.15 # 8.5 degree tilt to see "over" the disk
     
-    # 1. FIXED SCREEN SETUP (Horizontal & Vertical aligned properly)
+    # 1. CAMERA SCREEN SETUP
     p_t = -1.0
-    p_theta = -y_pixel # Controls up/down
-    p_phi = x_pixel    # Controls left/right
+    p_theta = y_pixel
+    p_phi = x_pixel
     
-    # 2. Null Geodesic Enforcement (H=0)
+    # 2. THE PHYSICS FIX: Enforcing H=0 (Null Geodesic)
+    # We must calculate p_r exactly based on the inverse metric
     sigma = r0**2 + a**2 * jnp.cos(theta0)**2
     delta = r0**2 - 2*M*r0 + a**2
+    
     g_inv_tt = -( (r0**2 + a**2)**2 - delta * a**2 * jnp.sin(theta0)**2 ) / (sigma * delta)
     g_inv_tphi = -( 2 * M * r0 * a ) / (sigma * delta)
     g_inv_rr = delta / sigma
     g_inv_thth = 1 / sigma
     g_inv_phiphi = (delta - a**2 * jnp.sin(theta0)**2) / (sigma * delta * jnp.sin(theta0)**2)
     
+    # Solve for p_r to ensure the photon acts like light
     C = g_inv_tt * p_t**2 + 2 * g_inv_tphi * p_t * p_phi + g_inv_thth * p_theta**2 + g_inv_phiphi * p_phi**2
-    p_r = -jnp.sqrt(jnp.maximum(-C / g_inv_rr, 0.00001))
+    # Use jnp.maximum to prevent math errors during compilation
+    p_r = -jnp.sqrt(jnp.maximum(-C / g_inv_rr, 0.0001))
     
     init_state = jnp.array([0.0, r0, theta0, 0.0, p_t, p_r, p_theta, p_phi])
 
     def step_fn(carry, _):
         state, color, active = carry
         
-        # Adaptive step: slow down near the hole so we don't clip through the thin disk
-        r_current = state[1]
-        local_dt = jnp.where(r_current < 8.0, dt * 0.2, dt)
-        
-        new_state = geodesic_step(state, local_dt, a)
-        r, theta, phi, old_theta = new_state[1], new_state[2], new_state[3], state[2]
+        new_state = geodesic_step(state, dt, a)
+        r, theta = new_state[1], new_state[2]
 
-        # 1. SHADOW LOGIC
+        # 1. SHADOW: Event Horizon Check
         horizon = M + jnp.sqrt(M**2 - a**2)
-        is_swallowed = r < (horizon + 0.05)
+        is_swallowed = r < (horizon + 0.1)
         
-        # 2. RAZOR-SHARP DISK LOGIC
-        # Checking if it crossed the equator is much sharper than a thick volume
-        crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        is_in_disk = (r > 5.0) & (r < 20.0) & crossed_plane
+        # 2. DISK: Volumetric "Thick" Disk (r between 4 and 15)
+        # Instead of crossing a plane, we check if it's "inside" the glowing gas
+        is_in_disk = (r > 4.0) & (r < 15.0) & (jnp.abs(jnp.cos(theta)) < 0.05)
         
-        # 3. DOPPLER BEAMING
-        # Gas moving toward us gets intensely bright!
-        doppler_factor = 1.0 + 0.85 * jnp.sin(phi)
-        base_glow = 1.5 / jnp.sqrt(r)
-        cinematic_brightness = base_glow * (doppler_factor ** 3)
+        # 3. GLOW: Brighter near the center
+        brightness = jnp.where(is_in_disk, 1.5 / jnp.sqrt(r), 0.0)
         
-        brightness = jnp.where(is_in_disk, cinematic_brightness, 0.0)
-        
+        # Apply color if we hit the disk
         new_color = jnp.where(active & is_in_disk, brightness, color)
+        
+        # Turn it pure black if it falls into the black hole
         final_color = jnp.where(active & is_swallowed, -1.0, new_color)
         
-        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < R_camera + 2.0)
+        # Stop tracing if swallowed, hit the disk, or escaped to the background
+        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < R_camera + 5.0)
         
         return (new_state, final_color, still_active), None
 
-    # Trace for 1500 steps to capture the long looping paths
-    (final_state, res_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1500))
+    # Trace for 1000 steps
+    (final_state, res_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1000))
     return res_color
 
-# Vectorization mapping
+# Vectorization (Pushing all pixels to the GPU/CPU at once)
 render_view = vmap(vmap(trace_photon, in_axes=(0, None)), in_axes=(None, 0))
 
-print("🔭 Initializing H=0 Geodesics...")
-print("🔥 Rendering High-Res Cinematic Frame...")
-# We feed the grid in X, Y order
-raw_image = render_view(view_grid, view_grid)
-print("✅ Applying Optical Bloom...")
+print("🔭 Calibrating H=0 Null Geodesics...")
+print("🔥 Rendering Gargantua Matrix...")
+image = render_view(view_grid, view_grid)
+print("✅ Rendering Finished.")
 
-# --- 🎬 CINEMATIC POST-PROCESSING ---
-# 1. Ensure the image is right-side up. 
-# Removing the .T and using origin='lower' usually fixes the matrix rotation
-clean_image = jnp.maximum(raw_image.T, 0.0)
-
-# 2. Camera Lens Bloom
-bloom_light = gaussian_filter(clean_image, sigma=2.0)
-bloom_heavy = gaussian_filter(clean_image, sigma=6.0)
-final_cinematic_image = clean_image + (0.7 * bloom_light) + (0.3 * bloom_heavy)
-
-# 3. Custom Hollywood Colormap
-colors = [(0, 'black'), (0.15, '#2b0000'), (0.4, '#aa2200'), (0.7, '#ffaa00'), (1, 'white')]
-cmap_name = 'gargantua'
-cm = mcolors.LinearSegmentedColormap.from_list(cmap_name, colors)
-
-# --- DISPLAY ---
-plt.figure(figsize=(12, 10), facecolor='black')
-plt.imshow(final_cinematic_image, cmap=cm, origin='lower', vmin=0.0, vmax=2.0)
+# --- Professional Post-Processing ---
+plt.figure(figsize=(10, 10), facecolor='black')
+# We use .T (Transpose) to ensure X and Y axes are correct
+# vmin=0.0 ensures both the background (0) and shadow (-1) are pitch black
+plt.imshow(image.T, cmap='inferno', origin='lower', vmin=0.0, vmax=0.7)
 plt.axis('off')
-plt.title("Gargantua: Relativistic Ray-Tracer", color='white', fontsize=16, alpha=0.7)
-plt.tight_layout()
-plt.savefig("gargantua_cinematic.png", facecolor='black', bbox_inches='tight', pad_inches=0, dpi=300)
+plt.title("Gargantua: H=0 Null Geodesic Engine", color='white', fontsize=16)
+plt.savefig("gargantua_master.png", bbox_inches='tight', pad_inches=0, dpi=150)
 plt.show()
