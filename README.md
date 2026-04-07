@@ -52,3 +52,7 @@ Next Step: **Ray-Batching** (Processing 1,000,000 photons simultaneously using J
 
 ## 🚀 Getting Started
 `pip install jax jaxlib numpy matplotlib`
+## 🌟 Future Goals
+- [ ] **Accretion Disk:** Add a glowing fluid disk with Doppler boosting.
+- [ ] **Gravitational Lensing:** Map the Milky Way starfield onto the background.
+- [ ] **CUDA Support:** Optimize JAX kernels for NVIDIA GPUs.
