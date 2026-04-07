@@ -4,29 +4,30 @@ import matplotlib.pyplot as plt
 from src.core.solver import geodesic_step
 
 # --- Black Hole Parameters ---
-M = 1.0     # Mass
-a = 0.99    # High spin (Gargantua style)
-R_camera = 50.0 
+M = 1.0
+a = 0.95    # Slightly lower spin makes the shadow easier to find initially
+R_camera = 40.0 
 
-# --- Gargantua Perspective Setup ---
-RESOLUTION = 250  # Better resolution for the 'rings'
-# We use a wider grid to see the whole horizon + disk
-view_grid = jnp.linspace(-0.15, 0.15, RESOLUTION) 
+# --- Resolution (Keep it at 200 for a crisp image) ---
+RESOLUTION = 200
+# We need a very specific grid range to 'frame' the black hole
+view_grid = jnp.linspace(-0.2, 0.2, RESOLUTION)
 
 def trace_photon(x_pixel, y_pixel):
-    dt = 0.3
+    dt = 0.25 # Precision step
     
-    # Place camera at r=80, tilted 5 degrees off the equator (pi/2.1)
-    # The initial momentum (p_r, p_theta, p_phi) is what 'aims' the lens
+    # 1. INITIAL MOMENTUM (The 'Aura' Fix)
+    # We fire p_r = -1.0 to go toward the hole.
+    # We use x and y pixels as SMALL angular corrections.
     init_state = jnp.array([
         0.0,            # t
-        80.0,           # r (Distance)
-        jnp.pi/2.1,     # theta (Tilt)
+        R_camera,       # r
+        jnp.pi/2.05,    # theta (tilted view)
         0.0,            # phi
-        -1.0,           # p_t
-        -1.0,           # p_r (Fire toward the center)
-        y_pixel * 10.0, # p_theta (Vertical spread)
-        x_pixel * 10.0  # p_phi (Horizontal spread)
+        -1.0,           # p_t (Energy)
+        -1.0,           # p_r (Inward)
+        y_pixel * 3.5,  # p_theta (VERTICAL TILT - lowered from 10.0)
+        x_pixel * 3.5   # p_phi (HORIZONTAL TILT - lowered from 10.0)
     ])
 
     def step_fn(carry, _):
@@ -35,41 +36,45 @@ def trace_photon(x_pixel, y_pixel):
         
         r, theta, old_theta = new_state[1], new_state[2], state[2]
 
-        # 1. Shadow Logic: Did we hit the horizon?
+        # 1. SHADOW LOGIC
+        # If r gets too close to the horizon, it's black forever.
         horizon = M + jnp.sqrt(M**2 - a**2)
-        is_swallowed = r < (horizon + 0.05)
+        is_swallowed = r < (horizon + 0.1)
         
-        # 2. Disk Logic: Crossing the 'Glow' plane (theta = pi/2)
+        # 2. DISK LOGIC (The 'Rings')
+        # Crossing the equatorial plane
         crossed_plane = (old_theta - jnp.pi/2) * (theta - jnp.pi/2) < 0
-        # The disk should exist between 6.0 and 25.0 radius
-        is_in_disk = (r > 6.0) & (r < 25.0) & crossed_plane
+        # The disk is a ring from r=6 to r=15
+        is_in_disk = (r > 6.0) & (r < 15.0) & crossed_plane
         
-        # 3. Coloring: 
-        # Inside the disk, brightness falls off as 1/r^2
-        brightness = jnp.where(is_in_disk, 15.0 / (r**1.5), 0.0)
+        # 3. COLORING (The 'Interstellar' Palette)
+        # Glow is brighter at the inner edge (r=6)
+        brightness = jnp.where(is_in_disk, 1.0 / (r - 5.5), 0.0)
         new_color = jnp.where(active & is_in_disk, brightness, color)
         
-        # Stop if we hit the hole or disk
-        still_active = active & (~is_swallowed) & (~is_in_disk)
+        # If it hits the horizon, set color to -1.0 (Special flag for Black)
+        final_color = jnp.where(is_swallowed & active, -1.0, new_color)
         
-        return (new_state, new_color, still_active), None
+        still_active = active & (~is_swallowed) & (~is_in_disk) & (r < 100.0)
+        
+        return (new_state, final_color, still_active), None
 
-    # Run for 2000 steps to ensure the light has time to travel and curve
-    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(2000))
+    (final_state, final_color, _), _ = lax.scan(step_fn, (init_state, 0.0, True), jnp.arange(1500))
     return final_color
 
-# Vectorize across the grid
+# Vectorization
 render_view = vmap(vmap(trace_photon, in_axes=(0, None)), in_axes=(None, 0))
 
-print("🔭 JAX kernels compiled. Starting Relativistic Ray-Trace...")
+print("🔭 Compiling Kerr-Geometry Kernels...")
 image = render_view(view_grid, view_grid)
-print("✅ High-fidelity render complete!")
+print("✅ Rendering Finished.")
 
-# --- Visual Styling ---
+# --- Professional Post-Processing ---
 plt.figure(figsize=(10, 10), facecolor='black')
-# 'afmhot' or 'magma' gives that deep interstellar orange
-plt.imshow(image, cmap='afmhot', origin='lower', vmin=0.0, vmax=2.5)
-plt.title("Kerr Spacetime Lensing (Gargantua Milestone)", color='white', size=15)
+# Use 'inferno' or 'gist_heat' for that movie look
+# We clip the shadow (values of -1) to be pure black
+plt.imshow(image, cmap='hot', origin='lower', vmin=0.0, vmax=0.5)
 plt.axis('off')
-plt.savefig("gargantua_render.png", bbox_inches='tight', pad_inches=0)
+plt.title("Relativistic Ray-Trace: Gargantua v1.0", color='white', fontsize=18)
+plt.savefig("gargantua_v1.png", bbox_inches='tight', pad_inches=0)
 plt.show()
