@@ -9,7 +9,7 @@ a = 0.95    # Slightly lower spin makes the shadow easier to find initially
 R_camera = 40.0 
 
 # --- Resolution (Keep it at 200 for a crisp image) ---
-RESOLUTION = 200
+RESOLUTION = 400
 # We need a very specific grid range to 'frame' the black hole
 view_grid = jnp.linspace(-0.2, 0.2, RESOLUTION)
 
@@ -80,4 +80,4 @@ plt.imshow(image, cmap='hot', origin='lower', vmin=0.0, vmax=0.5)
 plt.axis('off')
 plt.title("Relativistic Ray-Trace: Gargantua v1.0", color='white', fontsize=18)
 plt.savefig("gargantua_v1.png", bbox_inches='tight', pad_inches=0)
-plt.show()
+plt.imshow(image, cmap='inferno', vmin=0.0, vmax=0.4)
